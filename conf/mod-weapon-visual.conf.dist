@@ -2,11 +2,20 @@
 # VISUAL WEAPON CONFIGURATION
 ########################################
 #
-#    VisualWeapon.Announce
+#    VisualWeapon.AnnounceEnable
 #        Description: Announce module is active when players log in.
 #        Default:     1 - Enabled
 #                     0 - Disabled
 #
 
 VisualWeapon.AnnounceEnable = 1
+
+#
+#    VisualWeapon.Cost
+#        Description: Gold cost to apply a weapon visual effect.
+#                     Set to 0 for free.
+#        Default:     50 (50 gold)
+#
+
+VisualWeapon.Cost = 50
 
