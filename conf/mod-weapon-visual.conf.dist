@@ -11,6 +11,17 @@
 VisualWeapon.AnnounceEnable = 1
 
 #
+#    VisualWeapon.PreviewDuration
+#        Description: Seconds the preview lasts before auto-reverting.
+#                     If the player doesn't confirm within this time,
+#                     the visual reverts automatically.
+#                     Other players CAN see the preview during this window.
+#        Default:     15 (15 seconds)
+#
+
+VisualWeapon.PreviewDuration = 15
+
+#
 # =============================================
 #  PRECIOS POR TIER (defecto si no hay override)
 # =============================================

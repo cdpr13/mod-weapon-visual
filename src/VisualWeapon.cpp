@@ -3,7 +3,7 @@
 ** Rewritten by Poszer & Talamortis https://github.com/poszer/ & https://github.com/talamortis/
 ** AzerothCore 2019 http://www.azerothcore.org/
 ** Cleaned and made into a module by Micrah https://github.com/milestorme/
-** Modified by GlacierWoW: Spanish translation, per-enchant gold cost, preview system
+** Modified by GlacierWoW: Spanish translation, per-enchant gold cost, timed preview system
 */
 
 #include "ScriptMgr.h"
@@ -11,6 +11,7 @@
 #include "Chat.h"
 #include "ScriptedGossip.h"
 #include "Config.h"
+#include "EventProcessor.h"
 
 using namespace std;
 
@@ -47,16 +48,13 @@ struct VisualData
 
 static string GOLD_ICON = "|TInterface/MoneyFrame/UI-GoldIcon:12:12:2:0|t";
 
-// Get cost for a specific enchant - checks individual override first, then tier default
 static uint32 GetEnchantCostGold(uint32 enchantId, uint8 tier)
 {
-    // Check individual override: VisualWeapon.Cost.Enchant.3789 = 200
     string configKey = "VisualWeapon.Cost.Enchant." + to_string(enchantId);
     int32 override_cost = sConfigMgr->GetOption<int32>(configKey, -1);
     if (override_cost >= 0)
         return static_cast<uint32>(override_cost);
 
-    // Fall back to tier default
     switch (tier)
     {
         case TIER_COMMON:   return sConfigMgr->GetOption<uint32>("VisualWeapon.Cost.Common", 10);
@@ -148,9 +146,12 @@ struct PreviewState
     uint8 Tier;
     bool MainHand;
     bool Active;
+    bool Confirmed;
+    uint32 PreviewToken; // to match timed revert with current preview
 };
 
 static std::unordered_map<uint64, PreviewState> playerPreviewState;
+static uint32 previewTokenCounter = 0;
 
 static void RevertPreview(Player* player)
 {
@@ -168,6 +169,49 @@ static void RevertPreview(Player* player)
 
     state.Active = false;
 }
+
+// Timed event to auto-revert preview
+class PreviewRevertEvent : public BasicEvent
+{
+public:
+    PreviewRevertEvent(ObjectGuid playerGuid, uint32 token)
+        : _playerGuid(playerGuid), _token(token) { }
+
+    bool Execute(uint64 /*time*/, uint32 /*diff*/) override
+    {
+        Player* player = ObjectAccessor::FindPlayer(_playerGuid);
+        if (!player)
+            return true;
+
+        uint64 guid = player->GetGUID().GetRawValue();
+        auto it = playerPreviewState.find(guid);
+        if (it == playerPreviewState.end())
+            return true;
+
+        PreviewState& state = it->second;
+
+        // Only revert if this token matches (hasn't been replaced by another preview)
+        // and hasn't been confirmed
+        if (state.Active && state.PreviewToken == _token && !state.Confirmed)
+        {
+            uint8 slot = state.MainHand ? EQUIPMENT_SLOT_MAINHAND : EQUIPMENT_SLOT_OFFHAND;
+            Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+
+            if (item)
+                player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0, state.OriginalVisual);
+
+            state.Active = false;
+
+            ChatHandler(player->GetSession()).SendSysMessage("|cffAAAAAA[Preview expirado] El efecto visual fue revertido.|r");
+        }
+
+        return true;
+    }
+
+private:
+    ObjectGuid _playerGuid;
+    uint32 _token;
+};
 
 class VisualWeaponNPC : public CreatureScript
 {
@@ -214,17 +258,33 @@ public:
 
         uint64 guid = player->GetGUID().GetRawValue();
         PreviewState& state = playerPreviewState[guid];
-        if (!state.Active)
-            state.OriginalVisual = player->GetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0);
 
+        // If switching preview, restore original first
+        if (state.Active)
+        {
+            uint8 prevSlot = state.MainHand ? EQUIPMENT_SLOT_MAINHAND : EQUIPMENT_SLOT_OFFHAND;
+            Item* prevItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, prevSlot);
+            if (prevItem)
+                player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (prevItem->GetSlot() * 2), 0, state.OriginalVisual);
+        }
+
+        // Save original visual
+        state.OriginalVisual = player->GetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0);
         state.VisualId = visual_id;
         state.EnchantId = enchantId;
         state.MainHand = MainHand;
         state.Tier = tier;
         state.EnchantName = enchantName;
         state.Active = true;
+        state.Confirmed = false;
+        state.PreviewToken = ++previewTokenCounter;
 
+        // Apply visual preview
         player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0, visual_id);
+
+        // Schedule auto-revert after 15 seconds
+        uint32 previewDuration = sConfigMgr->GetOption<uint32>("VisualWeapon.PreviewDuration", 15) * IN_MILLISECONDS;
+        player->m_Events.AddEvent(new PreviewRevertEvent(player->GetGUID(), state.PreviewToken), player->m_Events.CalculateTime(previewDuration));
     }
 
     void ConfirmVisual(Player* player)
@@ -256,11 +316,14 @@ public:
         if (cost > 0)
             player->ModifyMoney(-static_cast<int32>(cost));
 
+        // Mark as confirmed so the timed revert won't touch it
+        state.Confirmed = true;
+        state.Active = false;
+
         CharacterDatabase.Execute("REPLACE into `mod_weapon_visual_effect` (`item_guid`, `enchant_visual_id`) VALUES ('{}', '{}')", item->GetGUID().GetCounter(), state.VisualId);
 
         string msg = "|cff00FF00Efecto visual aplicado! Costo: " + to_string(costGold) + GOLD_ICON + "|r";
         ChatHandler(player->GetSession()).SendSysMessage(msg.c_str());
-        state.Active = false;
     }
 
     void RemoveVisual(Player* player, bool isMainHand)
@@ -285,9 +348,9 @@ public:
 
     void GetMenu(Player* player, Creature* creature, uint32 menuId)
     {
-        // Header in gossip: which hand + legend
         string handName = MainHand ? "Mano Principal" : "Mano Secundaria";
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cff00CCFF--- " + handName + " ---|r  |cff9d9d9dComun|r|cff1eff00 Poco comun|r|cff0070dd Raro|r|cffa335ee Epico|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_MAIN_MENU_ACTION);
+        uint32 previewSec = sConfigMgr->GetOption<uint32>("VisualWeapon.PreviewDuration", 15);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cff00CCFF" + handName + "|r  |cff9d9d9dComun|r |cff1eff00Poco comun|r |cff0070ddRaro|r |cffa335eeEpico|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_MAIN_MENU_ACTION);
 
         for (uint8 i = 0; i < (sizeof(vData) / sizeof(*vData)); i++)
         {
@@ -319,9 +382,11 @@ public:
         uint32 costGold = GetEnchantCostGold(state.EnchantId, state.Tier);
         string tierColor = GetTierColor(state.Tier);
         string handName = state.MainHand ? "Mano Principal" : "Mano Secundaria";
+        uint32 previewSec = sConfigMgr->GetOption<uint32>("VisualWeapon.PreviewDuration", 15);
 
-        // Info header in gossip
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cffFFFF00[Preview]|r " + tierColor + state.EnchantName + "|r en " + handName, GOSSIP_SENDER_MAIN, VIS_GOSSIP_CANCEL_ACTION);
+        // Info header
+        string previewInfo = "|cffFFFF00[Preview " + to_string(previewSec) + "s]|r " + tierColor + state.EnchantName + "|r - " + handName;
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, previewInfo, GOSSIP_SENDER_MAIN, VIS_GOSSIP_CANCEL_ACTION);
 
         // Confirm
         string confirmText = "|TInterface/ICONS/Spell_ChargePositive:20:20|t |cff00FF00Confirmar|r - " + to_string(costGold) + GOLD_ICON;
