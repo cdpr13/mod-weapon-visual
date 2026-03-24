@@ -11,11 +11,38 @@
 VisualWeapon.AnnounceEnable = 1
 
 #
-#    VisualWeapon.Cost
-#        Description: Gold cost to apply a weapon visual effect.
-#                     Set to 0 for free.
-#        Default:     50 (50 gold)
+#    VisualWeapon.Cost.Common
+#        Description: Gold cost for Common tier effects (gray).
+#                     Basic glows: Agilidad, Golpe de Roca, Afilado, etc.
+#        Default:     10 (10 gold)
 #
 
-VisualWeapon.Cost = 50
+VisualWeapon.Cost.Common = 10
+
+#
+#    VisualWeapon.Cost.Uncommon
+#        Description: Gold cost for Uncommon tier effects (green).
+#                     Mid-level glows: Oleada Arcana, Veneno Mortal, etc.
+#        Default:     30 (30 gold)
+#
+
+VisualWeapon.Cost.Uncommon = 30
+
+#
+#    VisualWeapon.Cost.Rare
+#        Description: Gold cost for Rare tier effects (blue).
+#                     High-end glows: Arma Profana, Drenar Sangre, etc.
+#        Default:     75 (75 gold)
+#
+
+VisualWeapon.Cost.Rare = 75
+
+#
+#    VisualWeapon.Cost.Epic
+#        Description: Gold cost for Epic tier effects (purple).
+#                     Top-tier glows: Mangosta, Escarcha Mortal, Verdugo, etc.
+#        Default:     150 (150 gold)
+#
+
+VisualWeapon.Cost.Epic = 150
 
