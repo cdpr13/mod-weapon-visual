@@ -27,13 +27,12 @@ enum VisualWeaponsGossip
     VIS_GOSSIP_CANCEL_ACTION        = 700
 };
 
-// Tier system for pricing
 enum EnchantTier
 {
-    TIER_COMMON   = 0,  // Basic effects
-    TIER_UNCOMMON = 1,  // Mid-level effects
-    TIER_RARE     = 2,  // High-end effects
-    TIER_EPIC     = 3   // Top-tier / most popular effects
+    TIER_COMMON   = 0,
+    TIER_UNCOMMON = 1,
+    TIER_RARE     = 2,
+    TIER_EPIC     = 3
 };
 
 struct VisualData
@@ -46,9 +45,18 @@ struct VisualData
     uint8 Tier;
 };
 
-// Default prices per tier (in gold), configurable via .conf
-static uint32 GetTierCostGold(uint8 tier)
+static string GOLD_ICON = "|TInterface/MoneyFrame/UI-GoldIcon:12:12:2:0|t";
+
+// Get cost for a specific enchant - checks individual override first, then tier default
+static uint32 GetEnchantCostGold(uint32 enchantId, uint8 tier)
 {
+    // Check individual override: VisualWeapon.Cost.Enchant.3789 = 200
+    string configKey = "VisualWeapon.Cost.Enchant." + to_string(enchantId);
+    int32 override_cost = sConfigMgr->GetOption<int32>(configKey, -1);
+    if (override_cost >= 0)
+        return static_cast<uint32>(override_cost);
+
+    // Fall back to tier default
     switch (tier)
     {
         case TIER_COMMON:   return sConfigMgr->GetOption<uint32>("VisualWeapon.Cost.Common", 10);
@@ -59,24 +67,23 @@ static uint32 GetTierCostGold(uint8 tier)
     }
 }
 
-static uint32 GetTierCostCopper(uint8 tier)
+static uint32 GetEnchantCostCopper(uint32 enchantId, uint8 tier)
 {
-    return GetTierCostGold(tier) * 10000;
+    return GetEnchantCostGold(enchantId, tier) * 10000;
 }
 
 static string GetTierColor(uint8 tier)
 {
     switch (tier)
     {
-        case TIER_COMMON:   return "|cff9d9d9d";  // Gray
-        case TIER_UNCOMMON: return "|cff1eff00";   // Green
-        case TIER_RARE:     return "|cff0070dd";   // Blue
-        case TIER_EPIC:     return "|cffa335ee";   // Purple
+        case TIER_COMMON:   return "|cff9d9d9d";
+        case TIER_UNCOMMON: return "|cff1eff00";
+        case TIER_RARE:     return "|cff0070dd";
+        case TIER_EPIC:     return "|cffa335ee";
         default:            return "|cffffffff";
     }
 }
 
-//                Menu  Submenu                        Icon                Id     Name                          Tier
 VisualData vData[] =
 {
     // Page 1
@@ -135,6 +142,7 @@ VisualData vData[] =
 struct PreviewState
 {
     uint32 VisualId;
+    uint32 EnchantId;
     uint32 OriginalVisual;
     string EnchantName;
     uint8 Tier;
@@ -144,7 +152,6 @@ struct PreviewState
 
 static std::unordered_map<uint64, PreviewState> playerPreviewState;
 
-// Helper: revert a player's preview if active
 static void RevertPreview(Player* player)
 {
     uint64 guid = player->GetGUID().GetRawValue();
@@ -192,32 +199,31 @@ public:
         return true;
     }
 
-    void ApplyPreview(Player* player, uint32 visual_id, uint8 tier, const string& enchantName)
+    void ApplyPreview(Player* player, uint32 visual_id, uint32 enchantId, uint8 tier, const string& enchantName)
     {
         uint8 slot = MainHand ? EQUIPMENT_SLOT_MAINHAND : EQUIPMENT_SLOT_OFFHAND;
 
         if (!IsValidWeapon(player, slot))
         {
-            string handName = MainHand ? "mano principal" : "mano secundaria";
-            ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000No tienes un arma valida en la %s.|r", handName.c_str());
+            string msg = "|cffFF0000No tienes un arma valida en la " + string(MainHand ? "mano principal" : "mano secundaria") + ".|r";
+            ChatHandler(player->GetSession()).SendSysMessage(msg.c_str());
             return;
         }
 
         Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
 
-        // Save original visual for cancel
         uint64 guid = player->GetGUID().GetRawValue();
         PreviewState& state = playerPreviewState[guid];
         if (!state.Active)
             state.OriginalVisual = player->GetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0);
 
         state.VisualId = visual_id;
+        state.EnchantId = enchantId;
         state.MainHand = MainHand;
         state.Tier = tier;
         state.EnchantName = enchantName;
         state.Active = true;
 
-        // Apply visual preview (only visual, not saved to DB)
         player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0, visual_id);
     }
 
@@ -235,12 +241,13 @@ public:
         if (!item)
             return;
 
-        uint32 cost = GetTierCostCopper(state.Tier);
+        uint32 cost = GetEnchantCostCopper(state.EnchantId, state.Tier);
+        uint32 costGold = GetEnchantCostGold(state.EnchantId, state.Tier);
 
         if (cost > 0 && !player->HasEnoughMoney(cost))
         {
-            ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000No tienes suficiente oro. Necesitas %u oro.|r", GetTierCostGold(state.Tier));
-            // Revert visual
+            string msg = "|cffFF0000No tienes suficiente oro. Necesitas " + to_string(costGold) + GOLD_ICON + ".|r";
+            ChatHandler(player->GetSession()).SendSysMessage(msg.c_str());
             player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0, state.OriginalVisual);
             state.Active = false;
             return;
@@ -249,57 +256,54 @@ public:
         if (cost > 0)
             player->ModifyMoney(-static_cast<int32>(cost));
 
-        // Save to DB
         CharacterDatabase.Execute("REPLACE into `mod_weapon_visual_effect` (`item_guid`, `enchant_visual_id`) VALUES ('{}', '{}')", item->GetGUID().GetCounter(), state.VisualId);
 
-        ChatHandler(player->GetSession()).PSendSysMessage("|cff00FF00Efecto visual aplicado! Se te cobraron %u oro.|r", GetTierCostGold(state.Tier));
+        string msg = "|cff00FF00Efecto visual aplicado! Costo: " + to_string(costGold) + GOLD_ICON + "|r";
+        ChatHandler(player->GetSession()).SendSysMessage(msg.c_str());
         state.Active = false;
     }
 
-    void RemoveVisual(Player* player, bool mainHand)
+    void RemoveVisual(Player* player, bool isMainHand)
     {
-        uint8 slot = mainHand ? EQUIPMENT_SLOT_MAINHAND : EQUIPMENT_SLOT_OFFHAND;
+        uint8 slot = isMainHand ? EQUIPMENT_SLOT_MAINHAND : EQUIPMENT_SLOT_OFFHAND;
         Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
-        string handName = mainHand ? "mano principal" : "mano secundaria";
+        string handName = isMainHand ? "mano principal" : "mano secundaria";
 
         if (!item)
         {
-            ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000No tienes un arma equipada en la %s.|r", handName.c_str());
+            string msg = "|cffFF0000No tienes un arma equipada en la " + handName + ".|r";
+            ChatHandler(player->GetSession()).SendSysMessage(msg.c_str());
             return;
         }
 
         player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (item->GetSlot() * 2), 0, 0);
         CharacterDatabase.Execute("DELETE FROM `mod_weapon_visual_effect` WHERE `item_guid` = '{}'", item->GetGUID().GetCounter());
 
-        ChatHandler(player->GetSession()).PSendSysMessage("|cff00FF00Efecto visual de %s removido.|r", handName.c_str());
+        string msg = "|cff00FF00Efecto visual de " + handName + " removido.|r";
+        ChatHandler(player->GetSession()).SendSysMessage(msg.c_str());
     }
 
     void GetMenu(Player* player, Creature* creature, uint32 menuId)
     {
+        // Header in gossip: which hand + legend
+        string handName = MainHand ? "Mano Principal" : "Mano Secundaria";
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cff00CCFF--- " + handName + " ---|r  |cff9d9d9dComun|r|cff1eff00 Poco comun|r|cff0070dd Raro|r|cffa335ee Epico|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_MAIN_MENU_ACTION);
+
         for (uint8 i = 0; i < (sizeof(vData) / sizeof(*vData)); i++)
         {
             if (vData[i].Menu == menuId)
             {
-                // Show tier color and price next to enchant names (not navigation items)
                 if (vData[i].Submenu == 0 && vData[i].Id != 0)
                 {
-                    uint32 costGold = GetTierCostGold(vData[i].Tier);
+                    uint32 costGold = GetEnchantCostGold(vData[i].Id, vData[i].Tier);
                     string tierColor = GetTierColor(vData[i].Tier);
-                    string nameWithCost = tierColor + vData[i].Name + "|r";
-                    if (costGold > 0)
-                        nameWithCost += " |cffFFD700[" + to_string(costGold) + "g]|r";
-                    else
-                        nameWithCost += " |cff00FF00[Gratis]|r";
-                    AddGossipItemFor(player, vData[i].Icon, nameWithCost, GOSSIP_SENDER_MAIN, i);
+                    string entry = tierColor + vData[i].Name + "|r - " + to_string(costGold) + GOLD_ICON;
+                    AddGossipItemFor(player, vData[i].Icon, entry, GOSSIP_SENDER_MAIN, i);
                 }
                 else
                     AddGossipItemFor(player, vData[i].Icon, vData[i].Name, GOSSIP_SENDER_MAIN, i);
             }
         }
-
-        // Show current hand info at top via chat
-        string handName = MainHand ? "|cff00CCFFMano Principal|r" : "|cff00CCFFMano Secundaria|r";
-        ChatHandler(player->GetSession()).PSendSysMessage("Seleccionando efecto para: %s", handName.c_str());
 
         player->PlayerTalkClass->SendGossipMenu(DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
@@ -312,30 +316,25 @@ public:
             return;
 
         PreviewState& state = it->second;
-        uint32 costGold = GetTierCostGold(state.Tier);
+        uint32 costGold = GetEnchantCostGold(state.EnchantId, state.Tier);
         string tierColor = GetTierColor(state.Tier);
         string handName = state.MainHand ? "Mano Principal" : "Mano Secundaria";
 
-        // Confirm option
-        string confirmText;
-        if (costGold > 0)
-            confirmText = "|TInterface/ICONS/Spell_ChargePositive:20:20|t |cff00FF00Confirmar|r |cffFFD700(" + to_string(costGold) + " oro)|r";
-        else
-            confirmText = "|TInterface/ICONS/Spell_ChargePositive:20:20|t |cff00FF00Confirmar (Gratis)|r";
+        // Info header in gossip
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|cffFFFF00[Preview]|r " + tierColor + state.EnchantName + "|r en " + handName, GOSSIP_SENDER_MAIN, VIS_GOSSIP_CANCEL_ACTION);
 
+        // Confirm
+        string confirmText = "|TInterface/ICONS/Spell_ChargePositive:20:20|t |cff00FF00Confirmar|r - " + to_string(costGold) + GOLD_ICON;
         AddGossipItemFor(player, GOSSIP_ICON_BATTLE, confirmText, GOSSIP_SENDER_MAIN, VIS_GOSSIP_CONFIRM_ACTION);
-        AddGossipItemFor(player, GOSSIP_ICON_TALK, "|TInterface/ICONS/Spell_ChargeNegative:20:20|t |cffFF0000Cancelar|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_CANCEL_ACTION);
 
-        // Info via chat
-        string previewMsg = "|cffFFFF00[Preview]|r " + tierColor + state.EnchantName + "|r en " + handName + ". Mira tu arma!";
-        ChatHandler(player->GetSession()).SendSysMessage(previewMsg.c_str());
+        // Cancel
+        AddGossipItemFor(player, GOSSIP_ICON_TALK, "|TInterface/ICONS/Spell_ChargeNegative:20:20|t |cffFF0000Cancelar|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_CANCEL_ACTION);
 
         player->PlayerTalkClass->SendGossipMenu(DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
     }
 
     void GetMainMenu(Player* player, Creature* creature)
     {
-        // Check which hands have weapons
         bool hasMainHand = IsValidWeapon(player, EQUIPMENT_SLOT_MAINHAND);
         bool hasOffHand = IsValidWeapon(player, EQUIPMENT_SLOT_OFFHAND);
 
@@ -349,7 +348,6 @@ public:
         else
             AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "|TInterface/PaperDoll/UI-PaperDoll-Slot-SecondaryHand:40:40:-18|t|cff9d9d9dMano Secundaria (sin arma)|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_CLOSE_ACTION);
 
-        // Remove options per hand
         if (hasMainHand)
             AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "|TInterface/ICONS/INV_Enchant_Disenchant:20:20:-4|t|cffFF4444Quitar efecto - Mano Principal|r", GOSSIP_SENDER_MAIN, VIS_GOSSIP_REMOVE_MAIN_ACTION);
         if (hasOffHand)
@@ -357,15 +355,11 @@ public:
 
         AddGossipItemFor(player, GOSSIP_ICON_INTERACT_1, "|TInterface/PaperDollInfoFrame/UI-GearManager-Undo:40:40:-18|tCerrar", GOSSIP_SENDER_MAIN, VIS_GOSSIP_CLOSE_ACTION);
 
-        // Show price legend
-        ChatHandler(player->GetSession()).SendSysMessage("|cff9d9d9dComun|r | |cff1eff00Poco comun|r | |cff0070ddRaro|r | |cffa335eeEpico|r");
-
         player->PlayerTalkClass->SendGossipMenu(VIS_DEFAULT_MESSAGE, creature->GetGUID());
     }
 
     bool OnGossipHello(Player* player, Creature* creature) override
     {
-        // Cancel any active preview when reopening menu
         RevertPreview(player);
         GetMainMenu(player, creature);
         return true;
@@ -427,8 +421,7 @@ public:
         }
         else if (menuData == 0)
         {
-            // Preview: apply visual temporarily, show confirm menu
-            ApplyPreview(player, vData[action].Id, vData[action].Tier, vData[action].Name);
+            ApplyPreview(player, vData[action].Id, vData[action].Id, vData[action].Tier, vData[action].Name);
             GetConfirmMenu(player, creature);
             return true;
         }
@@ -438,13 +431,11 @@ public:
     }
 };
 
-// Revert preview when player moves away from NPC (range check)
 class VisualWeaponPlayer : public PlayerScript
 {
 public:
     VisualWeaponPlayer() : PlayerScript("VisualWeaponPlayer")
     {
-        // Delete unused rows from DB table
         CharacterDatabase.Execute("DELETE FROM `mod_weapon_visual_effect` WHERE NOT EXISTS(SELECT 1 FROM item_instance WHERE `mod_weapon_visual_effect`.item_guid = item_instance.guid)");
     }
 
@@ -454,7 +445,6 @@ public:
             return;
 
         Item* pItem;
-
         QueryResult result = CharacterDatabase.Query("SELECT item_guid, enchant_visual_id FROM `mod_weapon_visual_effect` WHERE item_guid IN(SELECT guid FROM item_instance WHERE owner_guid = '{}')", player->GetGUID().GetCounter());
 
         if (!result)
@@ -469,7 +459,6 @@ public:
             for (int i = EQUIPMENT_SLOT_MAINHAND; i <= EQUIPMENT_SLOT_OFFHAND; ++i)
             {
                 pItem = player->GetItemByPos(255, i);
-
                 if (pItem && pItem->GetGUID().GetCounter() == item_guid)
                     player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (pItem->GetSlot() * 2), 0, visual);
             }
@@ -478,7 +467,6 @@ public:
 
     void OnPlayerEquip(Player* player, Item* /*item*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
     {
-        // Revert any active preview when equipping items
         RevertPreview(player);
         GetVisual(player);
     }
@@ -493,12 +481,10 @@ public:
 
     void OnPlayerLogout(Player* player) override
     {
-        // Clean up preview state on logout
         uint64 guid = player->GetGUID().GetRawValue();
         playerPreviewState.erase(guid);
     }
 
-    // Revert preview if player moves too far from NPC or gossip closes
     void OnPlayerUpdateZone(Player* player, uint32 /*newZone*/, uint32 /*newArea*/) override
     {
         RevertPreview(player);
@@ -513,7 +499,6 @@ public:
 
     void OnStartup() override
     {
-        // Delete unused rows from DB table
         CharacterDatabase.DirectExecute("DELETE FROM `mod_weapon_visual_effect` WHERE NOT EXISTS(SELECT 1 FROM item_instance WHERE `mod_weapon_visual_effect`.item_guid = item_instance.guid)");
     }
 };

@@ -11,38 +11,81 @@
 VisualWeapon.AnnounceEnable = 1
 
 #
-#    VisualWeapon.Cost.Common
-#        Description: Gold cost for Common tier effects (gray).
-#                     Basic glows: Agilidad, Golpe de Roca, Afilado, etc.
-#        Default:     10 (10 gold)
+# =============================================
+#  PRECIOS POR TIER (defecto si no hay override)
+# =============================================
+#
+#    Los enchants se agrupan en 4 tiers.
+#    Estos son los precios base en oro.
 #
 
-VisualWeapon.Cost.Common = 10
-
-#
-#    VisualWeapon.Cost.Uncommon
-#        Description: Gold cost for Uncommon tier effects (green).
-#                     Mid-level glows: Oleada Arcana, Veneno Mortal, etc.
-#        Default:     30 (30 gold)
-#
-
+VisualWeapon.Cost.Common   = 10
 VisualWeapon.Cost.Uncommon = 30
+VisualWeapon.Cost.Rare     = 75
+VisualWeapon.Cost.Epic     = 150
 
 #
-#    VisualWeapon.Cost.Rare
-#        Description: Gold cost for Rare tier effects (blue).
-#                     High-end glows: Arma Profana, Drenar Sangre, etc.
-#        Default:     75 (75 gold)
+# =============================================
+#  PRECIOS INDIVIDUALES POR ENCHANT (override)
+# =============================================
 #
-
-VisualWeapon.Cost.Rare = 75
-
+#    Para cambiar el precio de un enchant especifico,
+#    usa: VisualWeapon.Cost.Enchant.<ID> = <precio en oro>
 #
-#    VisualWeapon.Cost.Epic
-#        Description: Gold cost for Epic tier effects (purple).
-#                     Top-tier glows: Mangosta, Escarcha Mortal, Verdugo, etc.
-#        Default:     150 (150 gold)
+#    Si defines un precio aqui, ignora el tier.
+#    Pon 0 para hacerlo gratis.
 #
-
-VisualWeapon.Cost.Epic = 150
+#    IDs disponibles y sus tiers por defecto:
+#
+#    --- EPICOS (150g) ---
+#    3789  Rabiar
+#    3273  Escarcha Mortal
+#    3225  Verdugo
+#    2673  Mangosta
+#    425   Templo Oscuro
+#    1900  Cruzado
+#
+#    --- RAROS (75g) ---
+#    3854  Poder Arcano
+#    3870  Drenar Sangre
+#    1899  Arma Profana
+#    2671  Poder Arcano y Fuego
+#    2672  Poder de Sombras y Escarcha
+#    3855  Poder con Hechizos III
+#    1898  Robar Vida
+#    3846  Poder con Hechizos II
+#    803   Arma Ardiente
+#
+#    --- POCO COMUNES (30g) ---
+#    2674  Oleada Arcana
+#    2675  Maestro de Batalla
+#    3365  Runa de Rompe-espadas
+#    2343  Poder con Hechizos
+#    1894  Arma Helada
+#    3345  Tierra Viva
+#    3093  Poder vs No-muertos
+#    283   Furia de Viento
+#    3265  Aceite Bendito
+#    3266  Aceite Sagrado
+#    7     Veneno Mortal
+#
+#    --- COMUNES (10g) ---
+#    1103  Agilidad
+#    1743  Hoja Espectral
+#    1606  Poder de Ataque
+#    1     Golpe de Roca
+#    2     Marca de Escarcha
+#    3     Lengua de Fuego
+#    1903  Espiritu
+#    13    Afilado
+#    26    Aceite de Escarcha
+#    1896  Dano de Arma
+#    2666  Intelecto
+#    25    Aceite de Sombras
+#
+#    Ejemplos de override:
+#    VisualWeapon.Cost.Enchant.2673 = 200    # Mangosta a 200 oro
+#    VisualWeapon.Cost.Enchant.803 = 0       # Arma Ardiente gratis
+#    VisualWeapon.Cost.Enchant.3273 = 500    # Escarcha Mortal a 500 oro
+#
 
